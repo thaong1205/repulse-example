@@ -1,0 +1,13 @@
+{
+  "name": "retry-lite",
+  "version": "1.0.0",
+  "description": "Tiny helper that retries an async function until it succeeds.",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}
