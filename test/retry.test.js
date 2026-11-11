@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { retry, RetryError } = require('..');
+const { retry, wrap, RetryError } = require('..');
 
 function flaky(failures) {
   let calls = 0;
@@ -71,4 +71,20 @@ test('shouldRetry also gets the attempt number', async () => {
   const seen = [];
   await assert.rejects(retry(flaky(10).fn, { ...fast, retries: 3, shouldRetry: (e, a) => { seen.push(a); return true; } }));
   assert.deepStrictEqual(seen, [1, 2]);
+});
+
+test('an aborted signal stops while waiting', async () => {
+  const controller = new AbortController();
+  const f = flaky(10);
+  const pending = retry(f.fn, { backoffMs: 1000, jitter: 0, signal: controller.signal });
+  setTimeout(() => controller.abort(new Error('stop')), 20);
+  await assert.rejects(pending, /stop/);
+  assert.strictEqual(f.calls(), 1);
+});
+
+test('wrap returns a retried version of the function', async () => {
+  let calls = 0;
+  const add = wrap(async (a, b) => { calls++; if (calls < 2) throw new Error('x'); return a + b; }, fast);
+  assert.strictEqual(await add(2, 3), 5);
+  assert.strictEqual(calls, 2);
 });
