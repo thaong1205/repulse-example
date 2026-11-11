@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { retry } = require('..');
+const { retry, RetryError } = require('..');
 
 function flaky(failures) {
   let calls = 0;
@@ -14,38 +14,49 @@ function flaky(failures) {
   return { fn, calls: () => calls };
 }
 
+const fast = { backoffMs: 1, jitter: 0 };
+
 test('returns the result of the first successful call', async () => {
   const f = flaky(0);
-  assert.strictEqual(await retry(f.fn, { backoffMs: 1 }), 'ok');
+  assert.strictEqual(await retry(f.fn, fast), 'ok');
   assert.strictEqual(f.calls(), 1);
 });
 
 test('retries after a failure', async () => {
   const f = flaky(2);
-  assert.strictEqual(await retry(f.fn, { backoffMs: 1 }), 'ok');
+  assert.strictEqual(await retry(f.fn, fast), 'ok');
   assert.strictEqual(f.calls(), 3);
 });
 
 test('retries: 3 means 3 calls in total', async () => {
   const f = flaky(10);
-  await assert.rejects(retry(f.fn, { retries: 3, backoffMs: 1 }), /boom 3/);
+  await assert.rejects(retry(f.fn, { ...fast, retries: 3 }), RetryError);
   assert.strictEqual(f.calls(), 3);
 });
 
-test('the attempt number starts at 1', async () => {
-  const seen = [];
-  await retry(async (attempt) => { seen.push(attempt); if (attempt < 3) throw new Error('x'); }, { backoffMs: 1 });
-  assert.deepStrictEqual(seen, [1, 2, 3]);
+test('defaults to 5 attempts', async () => {
+  const f = flaky(10);
+  await assert.rejects(retry(f.fn, fast));
+  assert.strictEqual(f.calls(), 5);
+});
+
+test('the error carries the last failure and the attempt count', async () => {
+  await assert.rejects(retry(flaky(10).fn, { ...fast, retries: 2 }), (err) => {
+    assert.ok(err instanceof RetryError);
+    assert.strictEqual(err.attempts, 2);
+    assert.match(err.cause.message, /boom 2/);
+    return true;
+  });
 });
 
 test('shouldRetry can stop early', async () => {
   const f = flaky(10);
-  await assert.rejects(retry(f.fn, { retries: 5, backoffMs: 1, shouldRetry: () => false }), /boom 1/);
+  await assert.rejects(retry(f.fn, { ...fast, retries: 5, shouldRetry: () => false }), RetryError);
   assert.strictEqual(f.calls(), 1);
 });
 
-test('the wait doubles after every failure', async () => {
-  const started = Date.now();
-  await assert.rejects(retry(flaky(10).fn, { retries: 3, backoffMs: 20 })); // waits 20 + 40
-  assert.ok(Date.now() - started >= 55);
+test('onRetry is called before each wait', async () => {
+  const seen = [];
+  await retry(flaky(2).fn, { ...fast, onRetry: (err, attempt, wait) => seen.push([attempt, wait]) });
+  assert.deepStrictEqual(seen, [[1, 1], [2, 2]]);
 });
