@@ -60,3 +60,15 @@ test('onRetry is called before each wait', async () => {
   await retry(flaky(2).fn, { ...fast, onRetry: (err, attempt, wait) => seen.push([attempt, wait]) });
   assert.deepStrictEqual(seen, [[1, 1], [2, 2]]);
 });
+
+test('a jitter above 1 never makes a negative wait', async () => {
+  const waits = [];
+  await retry(flaky(3).fn, { backoffMs: 1, jitter: 5, onRetry: (e, a, w) => waits.push(w) });
+  assert.ok(waits.every((w) => w >= 0));
+});
+
+test('shouldRetry also gets the attempt number', async () => {
+  const seen = [];
+  await assert.rejects(retry(flaky(10).fn, { ...fast, retries: 3, shouldRetry: (e, a) => { seen.push(a); return true; } }));
+  assert.deepStrictEqual(seen, [1, 2]);
+});
